@@ -1,9 +1,12 @@
+# -*- coding:utf-8 -*-
+import random
+import time
 import urllib.request
-import json
+
 from bs4 import BeautifulSoup
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows; U; Windows NT 5.2) Gecko/2008070208 Firefox/3.0.1"
+    "Mozilla/5.0 (Windows; U; Windows NT 5.2) Gecko/2008070208 Firefox/3.0.1",
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-us) AppleWebKit/534.50 (KHTML, like Gecko) Version/5.1 Safari/534.50",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.6; rv:2.0.1) Gecko/20100101 Firefox/4.0.1",
     "Mozilla/5.0 (Windows NT 6.1; rv:2.0.1) Gecko/20100101 Firefox/4.0.1",
@@ -53,63 +56,112 @@ h2 = {
     'Cookie': 'JSESSIONID=293A59750C3B7B24B80FB92980C9C1D4'
 }
 
-proxy = {'http': str(json.loads(urllib.request.urlopen('http://localhost:5010/get/').read().decode('utf-8'))['proxy'])}
+
+def _print(x):
+    print(x)
 
 
-def _main_():
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy))
-    # 华章书籍目录存放文件
-    hz = open("HuazhangList.txt", "w", encoding='utf-8')
-    # 华章书籍机工图书馆数据
-    with open("AChuazhang", "r", encoding='utf-8') as f:
-        for i in f:
-            print("-----------------------------------")
-            print(json.loads(i)['name'])
-            _id = json.loads(i)['id']
-            # 拼机工的地址
-            _url = 'http://ebooks.cmanuf.com/detail?id={0}'.format(_id)
-            x = BeautifulSoup(urllib.request.urlopen(_url).read().decode('utf-8'), 'html.parser').find(
-                attrs={'target': '_blank'})
-            _url = 'http://ebooks.cmanuf.com' + x['href']
-            req = urllib.request.Request(url=_url, headers=h)
-            # 自动换代理，
-            is_loop = True
-            while is_loop:
-                try:
-                    response = opener.open(req)  # 通过代理访问地址
-                    html = response.read().decode('utf-8')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    ebookId = soup.find(id='ebookId')['value']
-                    is_loop = False
-                    print("解析成功.")
-                except Exception as e:  # 偷懒，直接用异常来测是不是到访问上限
-                    is_loop = True
-                    print(e, end=". ")
-                    print("更换代理.")
-                    proxy['http'] = str(
-                        json.loads(
-                            urllib.request.urlopen('http://localhost:5010/get/').read().decode('utf-8')
-                        )['proxy']  # 更换代理
-                    )
-                    opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy))
-            # response = urllib.request.urlopen(req)
-            # html = response.read().decode('utf-8')
-            # soup = BeautifulSoup(html, 'html.parser')
-            # ebookId = soup.find(id='ebookId')['value']
-            # 不用代理的话把64到82行、48行删掉就行。
-            print("解析成功.")
+def get_response(url, proxy={}, header={}, params=None, method=None):
+    if not params:
+        header['Content-Length'] = len(params)
+    if not proxy:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy))
+        response = opener.open(urllib.request.Request(url=url, headers=header, data=params, method=method))
+        return response
 
-            token = soup.find(id='token')['value']
+    response = urllib.request.urlopen(urllib.request.Request(url=url, headers=header, data=params, method=method))
+    return response
 
 
-            params = bytes('ebookId={0}&token={1}'.format(str(ebookId), str(token)), encoding='utf-8')
-            h2['Content-Length'] = len(params)
-            req = urllib.request.Request(url='http://www.hzcourse.com/web/refbook/queryAllChapterList', headers=h2,
-                                         data=params, method="POST")
+def post(data):
+    params = bytes(data, encoding='utf-8')
+    req = urllib.request.Request(url='http://198.13.46.231:18899/senddata',
+                                 headers={'Content-Length': len(params)}, data=params, method="POST")
+    flag = True
+    while flag:
+        try:
+            _print("尝试提交任务.")
             response = urllib.request.urlopen(req)
-            html = response.read().decode('utf-8')  # 目录的json数据
-            print(html)
-            hz.write(html + '\n')
+            flag = False
+        except Exception as e:
+            _print("任务提交失败.")
+            _print(str(e))
+            time.sleep(random.choice(range(1, 4)))
+            break
+    _print("任务提交成功.")
 
 
-_main_()
+def get():
+    flag = True
+    while flag:
+        try:
+            _print("尝试领取任务")
+            response = urllib.request.urlopen('http://198.13.46.231:18900/gettask')
+        except Exception as e:
+            flag = False
+            _print("任务领取失败.")
+            _print(str(e))
+            time.sleep(1)
+            break
+    print("任务领取成功. ")
+    return str(response.read().decode("utf-8")).split(' ')
+
+
+def auto_proxy():
+    return {}
+
+
+def download():
+    flag = False
+    while not flag:
+        access_err = False  # 访问错误，说明到访问上限了
+        for _id in get():
+            http_err = False  # HTTP错误，一般是网页请求错误
+            if not _id:
+                continue
+
+            if 'clear' in _id:
+                _print("任务队列空.")
+                flag = True
+                break
+
+            response = str(_id)
+            if not access_err:
+                soup = BeautifulSoup(  # 从机工获取跳转url
+                    get_response(url='http://ebooks.cmanuf.com/detail?id={0}'.format(_id)).read().decode('utf-8'),
+                    'html.parser').find(attrs={'target': '_blank'})
+                for x in range(5):  # 5次错误后把id返回服务器
+                    try:
+                        soup = BeautifulSoup(  # 从跳转url跳转到华章并取参数
+                            get_response(url=('http://ebooks.cmanuf.com' + soup['href']), header=h,
+                                         proxy=auto_proxy()).read().decode('utf-8'),
+                            'html.parser')
+                        http_err = True
+                        break
+                    except Exception as e:
+                        http_err = False
+                        _print("网页访问错误。")
+                        _print(e)
+                        time.sleep(1)
+                if not http_err:
+                    try:
+                        ebookId = soup.find(id='ebookId')['value']
+                        _print("解析成功.")
+                    except Exception as e:
+                        access_err = True
+                        _print(e)
+                        _print("达到访问上限.")
+                        post(response)
+                        continue
+                    token = soup.find(id='token')['value']
+
+                    try:
+                        response = get_response(url="http://www.hzcourse.com/web/refbook/queryAllChapterList",
+                                                params=bytes('ebookId={0}&token={1}'.format(str(ebookId), str(token)),
+                                                             encoding='utf-8'), header=h2, method="POST").read().decode(
+                            'utf-8')
+                    except Exception as e:
+                        _print(e)
+                        _print("目录获取失败.")
+            post(response)
+    _print("任务全部完成.")
