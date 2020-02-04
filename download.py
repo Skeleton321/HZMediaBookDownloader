@@ -62,8 +62,12 @@ def _print(x):
 
 
 def get_response(url, proxy={}, header={}, params=None, method=None):
+    if not header:
+        header['User-Agent'] = random.choice(USER_AGENTS)
+        
     if not params:
         header['Content-Length'] = len(params)
+        
     if not proxy:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy))
         response = opener.open(urllib.request.Request(url=url, headers=header, data=params, method=method))
