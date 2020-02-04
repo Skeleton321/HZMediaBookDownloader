@@ -10,7 +10,8 @@ data = [10550, 10522, 10518, 10534, 10505, 10511, 10866, 10610, 10601, 10578, 10
 
 back_data = {}
 n = 5   #一次发送的任务个数
-lock = Lock()
+rlock = Lock()
+wlock = Lock()
 class TPost(threading.Thread):
     def run(self):
         server = HTTPServer(host1,Post)
@@ -22,37 +23,41 @@ class TGet(threading.Thread):
 
 class Post(BaseHTTPRequestHandler):
     def do_POST(self):
+        global wlock
+        wlock.acquire()
         if self.path == "/senddata":
-            global lock
             global back_data
-            lock.acquire()
             content_length = int(self.headers["Content-Length"])
             body = self.rfile.read(content_length)
             try:
                 ebookId = json.loads(body)['data']['data'][0]['ebookId']
                 with open(str(ebookId) + ".json","wb") as f:
                     f.write(body)
+                back_data.pop(ebookId)
             except:
                 pass
             self.send_response(HTTPStatus.OK)
             self.end_headers()
             self.wfile.write(bytes("OK",encoding="utf8"))
-            lock.release()
+        lock.release()
 
 class Get(BaseHTTPRequestHandler):
     def do_GET(self):
         global data
         global back_data
-        global lock
+        global rlock
+        global wlock
         respone_text = ""
-        lock.acquire()
+        rlock.acquire()
         if self.path == "/gettask":
             try:
                 for i in range(n):
                     #按照优先级获取任务
                     d = data.pop(0)
                     respone_text += str(d) + " "
+                    wlock.acquire
                     back_data.update({d:d}) #标记已发送的任务，如果用户下载完成并且传回任务，这个字典里的书籍id会被删除
+                    wlock.release()
             except:
                 respone_text = "clear"
 
@@ -60,10 +65,10 @@ class Get(BaseHTTPRequestHandler):
         self.send_header("Content-type","text/html")
         self.end_headers()
         self.wfile.write(bytes(respone_text,encoding="utf8"))
-        lock.release()
+        rlock.release()
 
 g = TGet()
-P = TPost()
+p = TPost()
 g.start()
 p.start()
 g.join()
