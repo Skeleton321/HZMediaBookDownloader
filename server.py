@@ -39,7 +39,7 @@ class Post(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.end_headers()
             self.wfile.write(bytes("OK",encoding="utf8"))
-        lock.release()
+        wlock.release()
 
 class Get(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -55,7 +55,7 @@ class Get(BaseHTTPRequestHandler):
                     #按照优先级获取任务
                     d = data.pop(0)
                     respone_text += str(d) + " "
-                    wlock.acquire
+                    wlock.acquire()
                     back_data.update({d:d}) #标记已发送的任务，如果用户下载完成并且传回任务，这个字典里的书籍id会被删除
                     wlock.release()
             except:
@@ -73,3 +73,5 @@ g.start()
 p.start()
 g.join()
 p.join()
+s = json.dumps(back_data,ensure_ascii=False)
+open("back_data.json","w").write(s)
