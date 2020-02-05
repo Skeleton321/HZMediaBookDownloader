@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+import os
 import random
 import time
 import urllib.request
@@ -56,19 +57,26 @@ h2 = {
     'Cookie': 'JSESSIONID=293A59750C3B7B24B80FB92980C9C1D4'
 }
 
+_log = open(time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime()) + ".log", 'a', encoding="utf-8")
+debug = False
+if os.path.exists("_debug"):
+    debug = True
 
-def _print(x):
+
+def _print(x, __line=""):
     print(x)
+    _log.write(time.strftime("%Y-%m-%d %H:%M:%S ", time.localtime()) + " " + str(x) + '\n')
+    _log.flush()
 
 
 def get_response(url, proxy={}, header={}, params=None, method=None):
-    if not header:
+    if header:
         header['User-Agent'] = random.choice(USER_AGENTS)
-        
-    if not params:
+
+    if params:
         header['Content-Length'] = len(params)
-        
-    if not proxy:
+
+    if proxy:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy))
         response = opener.open(urllib.request.Request(url=url, headers=header, data=params, method=method))
         return response
@@ -79,16 +87,24 @@ def get_response(url, proxy={}, header={}, params=None, method=None):
 
 def post(data):
     params = bytes(data, encoding='utf-8')
-    req = urllib.request.Request(url='http://198.13.46.231:18899/senddata',
+    url = "http://198.13.46.231:18899/senddata"
+    if debug:
+        url = "http://localhost:8899/senddata"
+    req = urllib.request.Request(url=url,
                                  headers={'Content-Length': len(params)}, data=params, method="POST")
-    flag = True
-    while flag:
+
+    flag = False
+    for i in range(10):
         try:
             _print("尝试提交任务.")
             response = urllib.request.urlopen(req)
-            flag = False
+            flag = True
         except Exception as e:
-            _print("任务提交失败.")
+            xx = ""
+            if flag:
+                xx = data
+                flag = False
+            _print("任务提交失败.", __line=xx)
             _print(str(e))
             time.sleep(random.choice(range(1, 4)))
             break
@@ -100,15 +116,18 @@ def get():
     while flag:
         try:
             _print("尝试领取任务")
-            response = urllib.request.urlopen('http://198.13.46.231:18900/gettask')
+            url = "http://198.13.46.231:18900/gettask"
+            if debug:
+                url = 'http://localhost:8899/gettask'
+            response = urllib.request.urlopen(url)
         except Exception as e:
             flag = False
-            _print("任务领取失败.")
+            _print("任务领取失败.", __line=url + ", 110 line")
             _print(str(e))
             time.sleep(1)
             break
-    print("任务领取成功. ")
-    return str(response.read().decode("utf-8")).split(' ')
+        print("任务领取成功. ")
+        return str(response.read().decode("utf-8")).split(' ')
 
 
 def auto_proxy():
@@ -128,44 +147,69 @@ def download():
                 _print("任务队列空.")
                 flag = True
                 break
+            _print("书籍detail id: " + str(_id))
+            if access_err:  # 读到上限直接退出
+                flag = True
+                break
 
-            response = str(_id)
-            if not access_err:
+            try:
                 soup = BeautifulSoup(  # 从机工获取跳转url
                     get_response(url='http://ebooks.cmanuf.com/detail?id={0}'.format(_id)).read().decode('utf-8'),
                     'html.parser').find(attrs={'target': '_blank'})
-                for x in range(5):  # 5次错误后把id返回服务器
-                    try:
-                        soup = BeautifulSoup(  # 从跳转url跳转到华章并取参数
-                            get_response(url=('http://ebooks.cmanuf.com' + soup['href']), header=h,
-                                         proxy=auto_proxy()).read().decode('utf-8'),
-                            'html.parser')
-                        http_err = True
-                        break
-                    except Exception as e:
-                        http_err = False
-                        _print("网页访问错误。")
-                        _print(e)
-                        time.sleep(1)
-                if not http_err:
-                    try:
-                        ebookId = soup.find(id='ebookId')['value']
-                        _print("解析成功.")
-                    except Exception as e:
-                        access_err = True
-                        _print(e)
-                        _print("达到访问上限.")
-                        post(response)
-                        continue
-                    token = soup.find(id='token')['value']
+            except Exception as e:
+                _print(e)
+                _print("机械工业服务器访问出现错误.", __line="download(), 144-146 line")
+                continue
 
-                    try:
-                        response = get_response(url="http://www.hzcourse.com/web/refbook/queryAllChapterList",
-                                                params=bytes('ebookId={0}&token={1}'.format(str(ebookId), str(token)),
-                                                             encoding='utf-8'), header=h2, method="POST").read().decode(
-                            'utf-8')
-                    except Exception as e:
-                        _print(e)
-                        _print("目录获取失败.")
+            for x in range(5):  # 5次错误后把id返回服务器
+                try:
+                    soup = BeautifulSoup(  # 从跳转url跳转到华章并取参数
+                        get_response(url=('http://ebooks.cmanuf.com' + soup['href']), header=h,
+                                     proxy=auto_proxy()).read().decode('utf-8'),
+                        'html.parser')
+                    http_err = True
+                    break
+                except Exception as e:
+                    http_err = False
+                    _print("网页访问错误。", __line="download(), 154-157 line")
+                    _print(e)
+                    time.sleep(1)
+
+            if http_err:
+                _print('华章服务器访问次数超时。')
+                continue
+
+            try:
+                ebookId = soup.find(id='ebookId')['value']
+                token = soup.find(id='token')['value']
+                _print("解析成功.")
+            except Exception as e:
+                access_err = True
+                _print(e)
+                _print("达到访问上限.")
+                post(response)
+                continue
+
+            try:
+                response = get_response(url="http://www.hzcourse.com/web/refbook/queryAllChapterList",
+                                        params=bytes('ebookId={0}&token={1}'.format(str(ebookId), str(token)),
+                                                     encoding='utf-8'), header=h2, method="POST").read().decode(
+                    'utf-8')
+            except Exception as e:
+                _print(e)
+                _print("目录获取失败.", __line="download(), 182-185 line")
+                continue
+
             post(response)
+
     _print("任务全部完成.")
+
+
+_log.write("+------------------------------------------+\n")
+try:
+    download()
+except Exception as e:
+    _print(e)
+
+print("按回车键退出...")
+input()
